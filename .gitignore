@@ -1,0 +1,14 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# local data (lives in ~/.onboard-v2 by default, but just in case)
+.onboard-v2/
+chroma/
+*.db
+models/

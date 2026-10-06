@@ -1,0 +1,9 @@
+anthropic>=0.70
+chromadb>=1.5
+fastembed>=0.7
+rank_bm25>=0.2
+fastapi>=0.115
+uvicorn>=0.30
+slack_bolt>=1.21
+python-dotenv>=1.0
+pyyaml>=6.0

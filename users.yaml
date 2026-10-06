@@ -1,0 +1,14 @@
+# Who is asking -> what they may see (groups), who their Buddy and HR contact are.
+# Key = Slack member ID (profile -> ... -> Copy member ID). "default" is used for anyone not listed.
+# In production this comes from the HR directory / Entra ID instead of this file.
+default:
+  name: New Joiner
+  groups: [all]
+  buddy: Besa Rexhepi
+  hr_contact: Mira Dervishi
+
+manager:
+  name: Demo Manager
+  groups: [all, managers]
+  buddy: Besa Rexhepi
+  hr_contact: Mira Dervishi
