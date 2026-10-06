@@ -1,13 +1,11 @@
-"""Step 10: EVAL. Run the golden set through the whole pipeline (router -> search -> rerank -> answer)
-and score it. Every case runs twice: if the two runs disagree, the case is FLAKY.
+"""Run golden_set.yaml through the full pipeline. Each case runs twice, a case that only passes sometimes is FLAKY.
 
-    python -m app.eval                  # full run, 2 runs per case
-    python -m app.eval --runs 3         # stricter flakiness check
-    python -m app.eval -v               # also print every answer
-    python -m app.eval --only "vpn"     # just the cases whose question contains "vpn"
+    python -m app.eval
+    python -m app.eval --runs 3
+    python -m app.eval -v               # print answers
+    python -m app.eval --only "vpn"
 
-Checks per case: outcome, cited source, required words, forbidden words, answer language.
-Eval questions are logged under "eval:<user>" and deleted from the SQLite log at the end.
+Eval questions are logged as "eval:<user>" and deleted afterwards.
 """
 import argparse
 import logging
@@ -23,7 +21,7 @@ from app.embeddings import embed_query
 from app.ingest import load_docs
 from app.store import delete_user
 
-# eval users are "eval:default", "eval:manager"... -> same profile as users.yaml, but logged separately
+# "eval:manager" -> "manager" profile, but logged under its own key
 _load_user = handler.load_user
 handler.load_user = lambda key: _load_user(key.removeprefix("eval:"))
 
@@ -32,7 +30,7 @@ ALBANIAN = re.compile(r"[ëç]|\b(dhe|në|për|që|është|një|të)\b", re.IGNO
 
 
 def check(case, reply, urls):
-    """Return a list of failures for one run (empty = pass)."""
+    """Returns the failures for one run, empty means pass."""
     fails = []
     expected = case["expect"] if isinstance(case["expect"], list) else [case["expect"]]
     if reply.outcome not in expected:
@@ -83,7 +81,7 @@ def main():
 
     print(f"{len(cases)} cases x {args.runs} runs | embed {EMBED_MODEL} | answer {GEN_MODEL} ({GEN_EFFORT}) "
           f"| threshold {SCORE_THRESHOLD}\n")
-    embed_query("warm up")          # load the model once before the threads start
+    embed_query("warm up")          # load the model before the threads start
 
     jobs = [(i, c) for i, c in enumerate(cases) for _ in range(args.runs)]
     results = {i: [] for i in range(len(cases))}
@@ -93,7 +91,7 @@ def main():
         for i, fut in futures:
             try:
                 results[i].append(fut.result())
-            except Exception as e:                      # a crash is a failed run, not a crashed eval
+            except Exception as e:                      # count it as a failed run
                 results[i].append((None, [f"crashed: {type(e).__name__}: {e}"], 0))
 
     passed, flaky, failed, latencies = 0, [], [], []
@@ -104,7 +102,7 @@ def main():
         if all(oks):
             passed += 1
             mark = "ok   "
-        elif any(oks):                                  # passed sometimes = flaky
+        elif any(oks):
             flaky.append(c["q"])
             mark = "FLAKY"
         else:

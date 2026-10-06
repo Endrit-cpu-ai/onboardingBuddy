@@ -1,8 +1,7 @@
-"""Step 9: SLACK. Same handle() as the API, behind a Slack DM.
+"""Slack DM bot.
 
-Two ways to run it:
-  - Socket Mode (local dev, no public URL):   python -m app.slack_bot
-  - HTTP mode (on a server): FastAPI serves /slack/events, see app/api.py
+    python -m app.slack_bot    # socket mode, for local dev
+For a server, use http mode instead (see api.py).
 """
 import logging
 import time
@@ -17,13 +16,11 @@ from app.store import log_escalation
 log = logging.getLogger("slack")
 bolt_app = App(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET or None)
 
-# ---------- office check (optional) ----------
-
 _office = {"members": set(), "loaded": 0.0}
 
 
 def in_office(client, user_id):
-    """Only answer members of OFFICE_USERGROUP (if set). The member list is refreshed every 10 minutes."""
+    """If OFFICE_USERGROUP is set, only its members get answers. Members are cached for 10 min."""
     if not OFFICE_USERGROUP:
         return True
     if time.time() - _office["loaded"] > 600:
@@ -32,10 +29,8 @@ def in_office(client, user_id):
     return user_id in _office["members"]
 
 
-# ---------- formatting ----------
-
 def esc(text):
-    """Slack treats < > & as control characters in messages, so escape them in text we didn't write."""
+    """Escape < > & in text we didn't write, Slack treats them as markup."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
@@ -44,8 +39,8 @@ def reply_blocks(reply, question):
     if reply.sources:
         text += "\n\n*Sources:* " + "  ".join(f"[{s['n']}] <{s['url']}|{esc(s['label'])}>" for s in reply.sources)
     blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": text[:2900]}}]
-    # "Get a human" only on real answers / Buddy replies: escalations are already with a human,
-    # and a button on a restricted reply would leak the sensitive question into the channel (V1 bug).
+    # no button on escalations: they're already with a human, and on restricted ones
+    # it would post the question to the channel
     if reply.outcome in ("answered", "buddy"):
         blocks.append({"type": "actions", "elements": [{
             "type": "button", "action_id": "get_human", "value": question[:1900],
@@ -64,12 +59,10 @@ def notify_team(client, user_id, question, reason, restricted=False):
     client.chat_postMessage(channel=ESCALATION_CHANNEL, text=text)
 
 
-# ---------- events ----------
-
 @bolt_app.event("message")
 def on_dm(event, client):
     if event.get("channel_type") != "im" or event.get("bot_id") or event.get("subtype"):
-        return                                               # only plain DMs from people
+        return                                               # plain DMs from people only
     user_id, channel, question = event["user"], event["channel"], event.get("text", "").strip()
     if not question:
         return
@@ -107,6 +100,6 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s | %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    embed_query("warm up")                                   # load the model before the first DM
+    embed_query("warm up")
     print("Onboard Buddy is running (Socket Mode). DM it in Slack. Ctrl+C to stop.")
     SocketModeHandler(bolt_app, SLACK_APP_TOKEN).start()

@@ -1,5 +1,4 @@
-"""Step 5: RERANK. Read each (question, candidate) pair TOGETHER and score how well the candidate ANSWERS it.
-Small local rerankers failed on our jargon in V1, so Claude Haiku scores all candidates in one cheap call.
+"""A small LLM scores every candidate 0-10 in one call. Local rerankers did badly on our acronyms in V1.
 
     python -m app.rerank
     python -m app.rerank "your question" [--groups all,managers]
@@ -30,7 +29,7 @@ def rerank(question, hits, top_n=RERANK_TOP_N):
     scores = complete_json(RERANK_MODEL, INSTRUCTIONS, f"<question>{question}</question>\n\n{passages}", max_tokens=400)
 
     if scores is None:
-        # Reranker failed: keep the search order but score everything 0, so the next gate escalates instead of guessing
+        # score everything 0 so the threshold gate escalates instead of guessing
         log.warning("rerank failed, falling back to search order")
         for h in hits:
             h.scores["rerank"] = 0.0
@@ -42,7 +41,7 @@ def rerank(question, hits, top_n=RERANK_TOP_N):
 
 
 def retrieve(question, groups=("all",), top_n=RERANK_TOP_N):
-    """The full retrieval stage: hybrid search for recall, rerank for precision."""
+    """Hybrid search, then rerank."""
     fused, _, _ = hybrid_search(question, groups)
     return rerank(question, fused[:SEARCH_K], top_n)
 
@@ -72,6 +71,6 @@ if __name__ == "__main__":
         show("how do I get on the company network from home?")
         show("who signs off on my expenses?")
         show("what is an ICR?")
-        show("when are salary reviews?")                          # nothing relevant for a new joiner
-        show("what's the wifi password in the Tirana office?")    # not in the docs at all
-        show("Si mund të kërkoj pushim?")                         # Albanian, before translation exists
+        show("when are salary reviews?")                          # manager-only doc
+        show("what's the wifi password in the Tirana office?")    # not in the docs
+        show("Si mund të kërkoj pushim?")                         # albanian, untranslated

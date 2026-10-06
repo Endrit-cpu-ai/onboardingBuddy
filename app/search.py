@@ -1,5 +1,4 @@
-"""Step 4: SEARCH. Vector search (Chroma) + keyword search (BM25), both limited to what the user may see,
-merged with Reciprocal Rank Fusion.
+"""Hybrid search: Chroma vectors + BM25, both ACL-filtered, merged with RRF.
 
     python -m app.search                                   # demo questions
     python -m app.search "what is an ICR?"
@@ -26,7 +25,7 @@ class Hit:
     url: str
     heading: str
     text: str
-    scores: dict = field(default_factory=dict)   # vector, keyword, rrf, later rerank
+    scores: dict = field(default_factory=dict)   # vector / keyword / rrf / rerank
 
     @property
     def label(self):
@@ -38,7 +37,7 @@ def _hit(id_, doc, meta):
 
 
 def tokenize(text):
-    """Lowercase words (any alphabet), minus very common words and single letters."""
+    # \w+ so albanian/macedonian words tokenize too
     return [w for w in re.findall(r"\w+", text.lower()) if len(w) > 1 and w not in STOPWORDS]
 
 
@@ -50,14 +49,13 @@ def vector_search(question, groups, k=SEARCH_K):
     hits = []
     for id_, doc, meta, dist in zip(res["ids"][0], res["documents"][0], res["metadatas"][0], res["distances"][0]):
         h = _hit(id_, doc, meta)
-        h.scores["vector"] = round(1 - dist, 4)          # cosine distance -> similarity
+        h.scores["vector"] = round(1 - dist, 4)
         hits.append(h)
     return hits
 
 
 def keyword_search(question, groups, k=SEARCH_K):
-    """BM25 over the chunks this user may see. Built per call: fine for hundreds of chunks;
-    cache it if the knowledge base grows to many thousands."""
+    # rebuilt on every call, fine for a few hundred chunks, cache it if the kb gets big
     data = collection().get(where=acl_filter(groups), include=["documents", "metadatas"])
     if not data["ids"]:
         return []
@@ -66,7 +64,7 @@ def keyword_search(question, groups, k=SEARCH_K):
     ranked = sorted(zip(scores, data["ids"], data["documents"], data["metadatas"]), key=lambda x: -x[0])
     hits = []
     for score, id_, doc, meta in ranked[:k]:
-        if score <= 0:                                    # no shared words at all
+        if score <= 0:
             break
         h = _hit(id_, doc, meta)
         h.scores["keyword"] = round(float(score), 3)
@@ -75,7 +73,7 @@ def keyword_search(question, groups, k=SEARCH_K):
 
 
 def rrf(*lists, k=RRF_K):
-    """Reciprocal Rank Fusion: each list gives 1/(k + rank). Uses ranks only, so the two score scales don't matter."""
+    """Reciprocal rank fusion. Uses ranks only, so the vector and BM25 scores don't need to be comparable."""
     merged = {}
     for hits in lists:
         for rank, h in enumerate(hits, start=1):
@@ -112,9 +110,9 @@ if __name__ == "__main__":
     if args:
         show(" ".join(args), groups)
     else:
-        show("how do I get on the company network from home?")      # paraphrase: vector should help
-        show("KST-PRN-2F")                                          # exact code: keyword should win
+        show("how do I get on the company network from home?")      # paraphrase
+        show("KST-PRN-2F")                                          # exact code
         show("what is an ICR?")                                     # acronym
-        show("when are salary reviews?", ["all"])                   # access control: new joiner
-        show("when are salary reviews?", ["all", "managers"])       # access control: manager
-        show("Si mund të kërkoj pushim?")                           # Albanian: keyword finds nothing
+        show("when are salary reviews?", ["all"])                   # acl: new joiner
+        show("when are salary reviews?", ["all", "managers"])       # acl: manager
+        show("Si mund të kërkoj pushim?")                           # albanian

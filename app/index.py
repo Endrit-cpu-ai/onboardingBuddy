@@ -1,8 +1,7 @@
-"""Step 3: EMBED + STORE. Put every chunk into Chroma with its vector and metadata.
-Unchanged docs are skipped, changed docs are replaced, deleted docs are removed.
+"""Embed chunks and store them in Chroma. Skips unchanged docs, replaces changed ones, removes deleted ones.
 
-    python -m app.index           # incremental
-    python -m app.index --force   # re-embed everything (after changing chunking or the embedding model)
+    python -m app.index           # only what changed
+    python -m app.index --force   # re-embed everything
 """
 import sys
 import time
@@ -17,7 +16,7 @@ def index(force=False):
     docs = load_docs()
     stats = {"indexed": 0, "unchanged": 0, "removed": 0, "chunks": 0}
 
-    # what's stored right now: path -> fingerprint
+    # path -> hash of what's indexed now
     stored = {m["path"]: m["doc_hash"] for m in col.get(include=["metadatas"])["metadatas"]}
 
     for doc in docs:
@@ -29,7 +28,7 @@ def index(force=False):
         for q in quarantined:
             print(f"  ! quarantined {q}")
 
-        col.delete(where={"path": doc.path})               # drop the old version first
+        col.delete(where={"path": doc.path})
         if chunks:
             col.add(
                 ids=[c.id for c in chunks],
@@ -44,7 +43,7 @@ def index(force=False):
         stats["chunks"] += len(chunks)
         print(f"  + {doc.path}: {len(chunks)} chunks")
 
-    for path in set(stored) - {d.path for d in docs}:     # file deleted -> remove from index
+    for path in set(stored) - {d.path for d in docs}:     # docs that were deleted
         col.delete(where={"path": path})
         stats["removed"] += 1
         print(f"  - {path}: removed")

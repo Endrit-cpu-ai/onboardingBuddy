@@ -1,6 +1,5 @@
-# Who is asking -> what they may see (groups), who their Buddy and HR contact are.
-# Key = Slack member ID (profile -> ... -> Copy member ID). "default" is used for anyone not listed.
-# In production this comes from the HR directory / Entra ID instead of this file.
+# Slack member ID -> groups, Buddy and HR contact. Anyone not listed gets "default".
+# Placeholder until we pull this from the HR directory.
 default:
   name: New Joiner
   groups: [all]

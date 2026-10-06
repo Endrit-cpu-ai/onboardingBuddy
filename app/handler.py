@@ -1,10 +1,9 @@
-"""Step 7b: HANDLE. The single entry point every front end calls (terminal, FastAPI, Slack):
-   who's asking -> router -> (HR | Buddy | greeting | answer) -> log -> reply
+"""Entry point for every front end (cli, api, slack): look up the user, route, answer or escalate, log.
 
     python -m app.handler "how do I book leave?"
     python -m app.handler --user manager "what should a manager do before a new joiner's first day?"
-    python -m app.handler --stats        # answer rate, languages, speed
-    python -m app.handler --gaps         # open escalations = missing docs
+    python -m app.handler --stats
+    python -m app.handler --gaps
 """
 import logging
 import sys
@@ -22,12 +21,12 @@ from app.store import log_escalation, log_question, open_gaps, stats
 @dataclass
 class Reply:
     outcome: str                  # answered | escalated | buddy | smalltalk
-    text: str                     # what the user sees
+    text: str
     route: str = ""
     reason: str = ""
     language: str = ""
     sources: list = field(default_factory=list)   # [{"n": 1, "label": ..., "url": ...}]
-    restricted: bool = False      # front ends must never forward the question text when True
+    restricted: bool = False      # never forward the question text when this is set
 
 
 def load_user(user_key):

@@ -1,8 +1,5 @@
-"""Step 7a: LOG. A small SQLite database with two tables:
-  questions   - every question and what happened to it (answered / escalated / buddy / ...)
-  escalations - the ones a human has to pick up = the list of gaps in the docs
-
-Sensitive (restricted) questions are logged as "[topic question, text withheld]", never in full."""
+"""SQLite log. `questions` has every question and its outcome, `escalations` is what a human needs to pick up.
+Restricted questions are stored as "[topic question, text withheld]"."""
 import json
 import sqlite3
 from contextlib import closing
@@ -18,8 +15,8 @@ CREATE TABLE IF NOT EXISTS questions (
     question   TEXT,
     english    TEXT,
     language   TEXT,
-    route      TEXT,      -- kb / buddy / restricted / smalltalk (+ how)
-    outcome    TEXT,      -- answered / escalated / buddy / smalltalk
+    route      TEXT,
+    outcome    TEXT,
     reason     TEXT,
     top_score  REAL,
     latency_ms INTEGER
@@ -31,7 +28,7 @@ CREATE TABLE IF NOT EXISTS escalations (
     question   TEXT,
     reason     TEXT,
     draft      TEXT,
-    sources    TEXT,      -- JSON: titles + scores the bot looked at
+    sources    TEXT,      -- json
     resolved   INTEGER DEFAULT 0
 );
 """
@@ -75,7 +72,7 @@ def stats():
 
 
 def delete_user(user_key):
-    """For leavers / test users: remove everything stored about one person."""
+    """Remove everything stored for a user (leavers, test users)."""
     with closing(_conn()) as c, c:
         c.execute("DELETE FROM questions WHERE user_key = ?", (user_key,))
         c.execute("DELETE FROM escalations WHERE user_key = ?", (user_key,))

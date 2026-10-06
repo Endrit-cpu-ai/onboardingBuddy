@@ -1,6 +1,6 @@
-"""Step 6b: ANSWER + GATES. Retrieve, check the score, let Sonnet answer from the sources only, check the citations.
+"""Retrieve, check the rerank score, answer from the sources only, check the citations.
 
-    python -m app.answer                         # demo questions (router + answer)
+    python -m app.answer                         # demo questions
     python -m app.answer "how do I connect to the VPN?"
     python -m app.answer --groups all,managers "what should a manager do before a new joiner's first day?"
 """
@@ -30,11 +30,11 @@ Rules:
 @dataclass
 class Result:
     status: str                     # answered | escalated
-    text: str = ""                  # the answer (only if answered)
+    text: str = ""
     reason: str = ""                # why it escalated
     passages: list = field(default_factory=list)
-    cited: list = field(default_factory=list)   # 1-based source numbers the answer used
-    draft: str = ""                 # what the model wrote, kept for review if it failed the check
+    cited: list = field(default_factory=list)   # 1-based source numbers
+    draft: str = ""                 # kept for review when the grounding check fails
 
     @property
     def top_score(self):
@@ -56,7 +56,7 @@ def build_prompt(original, english, passages):
 
 
 def grounding_check(text, n_passages):
-    """No citations = no answer. Citing a source that doesn't exist = no answer."""
+    """The answer needs citations, and they must point at real sources."""
     if not text or "NO_ANSWER" in text:
         return False, [], "model said the sources don't answer it"
     cited = sorted({int(n) for n in re.findall(r"\[(\d+)\]", text)})
@@ -68,17 +68,16 @@ def grounding_check(text, n_passages):
 
 
 def answer(original, english, groups=("all",)):
-    # retrieve with the English version (docs are English), rerank against it too
+    # docs are English, so search with the translation
     passages = retrieve(english, groups)
 
-    # Gate 2: nothing good enough -> don't call the answer model at all
+    # nothing good enough, don't bother calling the answer model
     if not passages or passages[0].scores.get("rerank", 0) < SCORE_THRESHOLD:
         best = passages[0].scores.get("rerank", 0) if passages else 0
         return Result("escalated", reason=f"best passage only scored {best:.0f}/10", passages=passages)
 
     draft = complete(GEN_MODEL, SYSTEM, build_prompt(original, english, passages), max_tokens=1500, effort=GEN_EFFORT)
 
-    # Gate 3: the answer must be grounded in the sources
     ok, cited, why = grounding_check(draft, len(passages))
     if not ok:
         return Result("escalated", reason=why, passages=passages, draft=draft)
@@ -86,7 +85,7 @@ def answer(original, english, groups=("all",)):
 
 
 def render(result):
-    """Plain-text version for the terminal; the Slack bot formats its own."""
+    """Terminal output."""
     if result.status == "escalated":
         return f"(escalated: {result.reason})"
     lines = [result.text, "", "Sources:"]
@@ -106,13 +105,13 @@ if __name__ == "__main__":
 
     questions = [" ".join(args)] if args else [
         "How do I connect to the VPN?",
-        "Si mund të kërkoj pushim?",                       # Albanian: how can I request leave?
-        "Кој ги одобрува моите трошоци?",                  # Macedonian: who approves my expenses?
-        "what's my notice period?",                        # rule -> restricted
-        "what does Petar Nikolov earn?",                   # LLM -> restricted (named colleague)
-        "is it weird that I haven't been invited to the sprint review?",   # -> buddy
-        "does Kestrel have a gym membership discount?",    # not in docs -> escalated
-        "Do I need manager approval for annual leave?",    # the poisoned doc must not win
+        "Si mund të kërkoj pushim?",                       # sq: how can I request leave?
+        "Кој ги одобрува моите трошоци?",                  # mk: who approves my expenses?
+        "what's my notice period?",                        # restricted (rule)
+        "what does Petar Nikolov earn?",                   # restricted (llm)
+        "is it weird that I haven't been invited to the sprint review?",   # buddy
+        "does Kestrel have a gym membership discount?",    # not in docs
+        "Do I need manager approval for annual leave?",    # injection doc must not win
     ]
     for q in questions:
         r = route(q)

@@ -1,8 +1,6 @@
-"""Step 2: LOAD + CLEAN + CHUNK.
-Read every doc in knowledge_base/, check its metadata, strip secrets, cut it into one chunk per topic,
-and drop any section that looks like prompt injection.
+"""Load the markdown docs, redact secrets, split them into chunks and drop prompt-injection sections.
 
-    python -m app.ingest      # print a report of docs and chunks
+    python -m app.ingest    # print a report
 """
 import hashlib
 import re
@@ -12,19 +10,17 @@ import yaml
 
 from app.config import CHUNK_OVERLAP, CHUNK_WORDS, KB_DIR
 
-# ---------- cleaning rules ----------
-
-# Secrets that must never reach the index (and therefore never an answer)
+# anything matching these gets redacted before it reaches the index
 SECRET_PATTERNS = [
     (re.compile(r"AKIA[0-9A-Z]{16}"), "aws_key"),
     (re.compile(r"xox[abprs]-[A-Za-z0-9-]{10,}"), "slack_token"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"), "api_key"),
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"), "private_key"),
-    (re.compile(r"(\w+://[^:\s/]+:)([^@\s]+)(@)"), "url_password"),           # postgres://user:PASS@host
+    (re.compile(r"(\w+://[^:\s/]+:)([^@\s]+)(@)"), "url_password"),           # scheme://user:PASS@host
     (re.compile(r"(?i)\b(password|passwd|pwd|secret|api[ _-]?key|token)(\s*[:=]\s*)(\S+)"), "password"),
 ]
 
-# Text that tries to give orders to the AI
+# sections matching this are skipped entirely
 INJECTION = re.compile(
     r"(?i)(ignore|disregard) (all |any )?(the )?(previous|prior|above) instructions"
     r"|system (prompt|instruction)|you are now|note for (ai|llm|assistant)s?"
@@ -33,22 +29,20 @@ INJECTION = re.compile(
 REQUIRED_FIELDS = ("title", "url", "acl")
 
 
-# ---------- data shapes ----------
-
 @dataclass
 class Doc:
     path: str
     title: str
     url: str
     acl: list
-    hash: str           # fingerprint of the raw file: changes only when the file changes
+    hash: str           # sha256 of the raw file, used to skip unchanged docs
     body: str
     secrets: list = field(default_factory=list)
 
 
 @dataclass
 class Chunk:
-    id: str             # stable id, e.g. "it-setup-vpn.md#2"
+    id: str             # e.g. "it-setup-vpn.md#2"
     path: str
     title: str
     url: str
@@ -59,11 +53,9 @@ class Chunk:
 
     @property
     def embed_text(self):
-        """What gets embedded: the chunk plus where it came from, so it makes sense on its own."""
+        # prefix with title + heading so the chunk makes sense on its own
         return f"{self.title} > {self.heading}\n{self.text}"
 
-
-# ---------- load + clean ----------
 
 def parse_frontmatter(raw, name):
     m = re.match(r"^---\n(.*?)\n---\n(.*)$", raw, re.DOTALL)
@@ -82,7 +74,7 @@ def redact(text):
         def repl(m, kind=kind):
             found.append(kind)
             if kind == "password":
-                return f"{m.group(1)}{m.group(2)}[REDACTED]"     # keep the label, hide the value
+                return f"{m.group(1)}{m.group(2)}[REDACTED]"     # keep "password:", drop the value
             if kind == "url_password":
                 return f"{m.group(1)}[REDACTED]{m.group(3)}"
             return "[REDACTED]"
@@ -93,7 +85,7 @@ def redact(text):
 def load_docs():
     docs = []
     for path in sorted(KB_DIR.glob("*.md")):
-        raw = path.read_text(encoding="utf-8").replace("\r\n", "\n")   # Windows line endings
+        raw = path.read_text(encoding="utf-8").replace("\r\n", "\n")
         meta, body = parse_frontmatter(raw, path.name)
         body, secrets = redact(body)
         acl = meta["acl"] if isinstance(meta["acl"], list) else [meta["acl"]]
@@ -104,13 +96,11 @@ def load_docs():
     return docs
 
 
-# ---------- chunk ----------
-
 def split_sections(body):
-    """One section per '## ' heading: the author already grouped the text by topic."""
+    """Split on ## headings."""
     heading, lines = "Overview", []
     for line in body.splitlines():
-        if line.startswith("# "):                # H1 = doc title, already in metadata
+        if line.startswith("# "):                # title is in the frontmatter already
             continue
         if line.startswith("## "):
             if "".join(lines).strip():
@@ -123,7 +113,7 @@ def split_sections(body):
 
 
 def window(text, size=CHUNK_WORDS, overlap=CHUNK_OVERLAP):
-    """Sections longer than `size` words are cut into overlapping windows."""
+    """Cut long sections into overlapping windows of `size` words."""
     words = text.split()
     if len(words) <= size:
         return [text]
@@ -140,7 +130,7 @@ def chunk_doc(doc):
     for heading, text in split_sections(doc.body):
         if INJECTION.search(text):
             quarantined.append(f"{doc.path} > {heading}")
-            continue                              # never indexed
+            continue
         for piece in window(text):
             chunks.append(Chunk(
                 id=f"{doc.path}#{len(chunks)}", path=doc.path, title=doc.title, url=doc.url,

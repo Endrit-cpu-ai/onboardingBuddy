@@ -1,8 +1,6 @@
-"""Turn text into vectors with a model that runs locally on CPU.
-The SAME model must embed both the chunks and the questions, or the numbers aren't comparable.
+"""Local embeddings via fastembed. Chunks and questions must go through the same model.
 
-Most embedding models expect questions and documents in a specific format (a short instruction in front).
-fastembed does NOT add it for you, so we apply the templates from config here.
+fastembed doesn't add the model's query/doc prompts, so we apply the templates from config.
 """
 from functools import lru_cache
 
@@ -13,17 +11,15 @@ from app.config import EMBED_DOC_TEMPLATE, EMBED_MODEL, EMBED_QUERY_TEMPLATE, MO
 
 @lru_cache(maxsize=1)
 def _model():
-    return TextEmbedding(EMBED_MODEL, cache_dir=str(MODEL_CACHE))   # first call downloads the model
+    return TextEmbedding(EMBED_MODEL, cache_dir=str(MODEL_CACHE))   # downloads on first use
 
 
 def embed_texts(texts):
-    """For chunks."""
     inputs = [EMBED_DOC_TEMPLATE.replace("{text}", t) for t in texts]
     return [v.tolist() for v in _model().embed(inputs)]
 
 
 def embed_query(question):
-    """For questions."""
     return next(iter(_model().embed([EMBED_QUERY_TEMPLATE.replace("{text}", question)]))).tolist()
 
 
